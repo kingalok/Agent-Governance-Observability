@@ -4,7 +4,7 @@ import { ReactNode } from "react";
 
 export const metadata: Metadata = {
   title: "Agent Governance Observability",
-  description: "Portfolio demo for AI agent governance and observability.",
+  description: "Enterprise dashboard demo for AI agent governance and observability.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

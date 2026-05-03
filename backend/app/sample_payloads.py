@@ -22,11 +22,11 @@ HIGH_RISK_SAMPLE_PAYLOAD = {
 
 POLICY_VIOLATION_SAMPLE_PAYLOAD = {
     "request_type": "document_intake",
-    "requested_action": "modify_customer_record",
-    "requested_tool": "update_record",
+    "requested_action": "modify_vendor_record",
+    "requested_tool": "update_vendor_record",
     "requested_by": "support.bot",
-    "document_title": "Account correction request",
-    "document_text": "Update the external customer record directly based on the attached request.",
+    "document_title": "Vendor correction request",
+    "document_text": "Update the vendor record directly based on the attached request.",
     "external_destination": False,
     "contains_pii": True,
 }

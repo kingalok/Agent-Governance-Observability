@@ -12,12 +12,12 @@ from app.services.registry import get_agent, list_agents, update_agent_status
 router = APIRouter(prefix="/agents", tags=["agents"])
 
 
-@router.get("", response_model=list[AgentResponse])
+@router.get("", response_model=list[AgentResponse], summary="List registered agents")
 def read_agents(db: Session = Depends(get_db)) -> list[AgentResponse]:
     return list_agents(db)
 
 
-@router.post("/{agent_id}/control", response_model=AgentResponse)
+@router.post("/{agent_id}/control", response_model=AgentResponse, summary="Pause, resume, or kill an agent")
 def control_agent(agent_id: int, request: AgentControlRequest, db: Session = Depends(get_db)) -> AgentResponse:
     agent = get_agent(db, agent_id)
     if agent is None:

@@ -7,10 +7,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "Agent Governance Observability API"
     app_env: str = "development"
+    app_version: str = "0.2.0"
+    log_level: str = "INFO"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
+    api_base_path: str = "/api/v1"
     api_cors_origins: list[str] = ["http://localhost:3000"]
     database_url: str = "sqlite:///./agent_governance.db"
+    auth_enabled: bool = False
+    demo_api_key: str = "change-me"
     langsmith_tracing: bool = True
     langsmith_endpoint: str = "https://api.smith.langchain.com"
     langsmith_api_key: str = ""

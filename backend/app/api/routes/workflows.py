@@ -4,56 +4,80 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models import ApprovalStatus
 from app.schemas import (
-    WorkflowResumeRequest,
+    ApprovalActionRequest,
+    ApprovalResponse,
+    RuntimeLogResponse,
     WorkflowRunDetailResponse,
     WorkflowRunRequest,
     WorkflowRunResponse,
 )
-from app.services.registry import get_agent
+from app.services.registry import get_agent, get_run_events
 from app.services.workflow import (
+    build_run_response,
     get_run_approval_checkpoint,
     get_sample_payloads,
     get_workflow_run,
+    kill_workflow_run,
+    list_pending_approvals,
+    list_workflow_runs,
+    reject_workflow,
     resume_workflow,
     run_workflow,
 )
 
 
-router = APIRouter(prefix="/workflows", tags=["workflows"])
+router = APIRouter(tags=["workflow-runs"])
 
 
-@router.post("/demo/run", response_model=WorkflowRunResponse)
-def trigger_demo_workflow(
-    agent_id: int, request: WorkflowRunRequest, db: Session = Depends(get_db)
-) -> WorkflowRunResponse:
+@router.post("/runs", response_model=WorkflowRunResponse, summary="Start a governance workflow run")
+def create_run(request: WorkflowRunRequest, agent_id: int, db: Session = Depends(get_db)) -> WorkflowRunResponse:
     agent = get_agent(db, agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
 
-    result = run_workflow(db, agent, request.model_dump())
-    db.refresh(result)
-    state = result.state_payload
-    return WorkflowRunResponse(
-        run_id=result.id,
-        workflow_name=result.workflow_name,
-        agent_name=agent.name,
-        status=result.status,
-        current_node=result.current_node,
-        state=result.status.value,
-        risk_tier=state.get("effective_risk_tier", agent.risk_tier.value),
-        requested_tool=result.requested_tool,
-        approval_required=bool(state.get("approval_required", False)),
-        message=state.get("final_message", "Workflow processed."),
-    )
+    run = run_workflow(db, agent, request.model_dump())
+    db.refresh(run)
+    return WorkflowRunResponse(**build_run_response(run, agent))
 
 
-@router.post("/demo/runs/{run_id}/resume", response_model=WorkflowRunResponse)
-def resume_demo_workflow(
-    run_id: int, request: WorkflowResumeRequest, db: Session = Depends(get_db)
-) -> WorkflowRunResponse:
-    if request.decision not in {ApprovalStatus.APPROVED, ApprovalStatus.REJECTED}:
-        raise HTTPException(status_code=400, detail="Decision must be approved or rejected")
+@router.get("/runs", response_model=list[WorkflowRunResponse], summary="List workflow runs")
+def read_runs(db: Session = Depends(get_db)) -> list[WorkflowRunResponse]:
+    runs = list_workflow_runs(db)
+    responses: list[WorkflowRunResponse] = []
+    for run in runs:
+        agent = get_agent(db, run.agent_id)
+        if agent is None:
+            continue
+        responses.append(WorkflowRunResponse(**build_run_response(run, agent)))
+    return responses
 
+
+@router.get("/runs/{run_id}", response_model=WorkflowRunDetailResponse, summary="Get workflow run details")
+def read_run(run_id: int, db: Session = Depends(get_db)) -> WorkflowRunDetailResponse:
+    run = get_workflow_run(db, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Workflow run not found")
+
+    payload = WorkflowRunDetailResponse.model_validate(run)
+    return payload.model_copy(update={"graph_state": run.state_payload})
+
+
+@router.get("/runs/{run_id}/events", response_model=list[RuntimeLogResponse], summary="List persisted run events")
+def read_run_events(run_id: int, db: Session = Depends(get_db)) -> list[RuntimeLogResponse]:
+    run = get_workflow_run(db, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Workflow run not found")
+
+    return [RuntimeLogResponse.model_validate(event) for event in get_run_events(db, run_id)]
+
+
+@router.get("/approvals/pending", response_model=list[ApprovalResponse], summary="List pending approvals")
+def read_pending_approvals(db: Session = Depends(get_db)) -> list[ApprovalResponse]:
+    return list_pending_approvals(db)
+
+
+@router.post("/approvals/{run_id}/approve", response_model=WorkflowRunResponse, summary="Approve and resume a run")
+def approve_run(run_id: int, request: ApprovalActionRequest, db: Session = Depends(get_db)) -> WorkflowRunResponse:
     run = get_workflow_run(db, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Workflow run not found")
@@ -63,37 +87,60 @@ def resume_demo_workflow(
         raise HTTPException(status_code=404, detail="Approval checkpoint not found")
 
     try:
-        updated_run = resume_workflow(db, run, approval, request.decision, request.decided_by)
+        updated_run = resume_workflow(db, run, approval, ApprovalStatus.APPROVED, request.reviewer_name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    state = updated_run.state_payload
     agent = get_agent(db, updated_run.agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
-
-    return WorkflowRunResponse(
-        run_id=updated_run.id,
-        workflow_name=updated_run.workflow_name,
-        agent_name=agent.name,
-        status=updated_run.status,
-        current_node=updated_run.current_node,
-        state=updated_run.status.value,
-        risk_tier=state.get("effective_risk_tier", agent.risk_tier.value),
-        requested_tool=updated_run.requested_tool,
-        approval_required=bool(state.get("approval_required", False)),
-        message=state.get("final_message", "Workflow resumed."),
-    )
+    return WorkflowRunResponse(**build_run_response(updated_run, agent))
 
 
-@router.get("/demo/runs/{run_id}", response_model=WorkflowRunDetailResponse)
-def read_workflow_run(run_id: int, db: Session = Depends(get_db)) -> WorkflowRunDetailResponse:
+@router.post("/approvals/{run_id}/reject", response_model=WorkflowRunResponse, summary="Reject a run")
+def reject_run(run_id: int, request: ApprovalActionRequest, db: Session = Depends(get_db)) -> WorkflowRunResponse:
     run = get_workflow_run(db, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Workflow run not found")
-    return run
+
+    approval = get_run_approval_checkpoint(db, run_id)
+    if approval is None:
+        raise HTTPException(status_code=404, detail="Approval checkpoint not found")
+
+    try:
+        updated_run = reject_workflow(
+            db,
+            run,
+            approval,
+            reviewer_name=request.reviewer_name,
+            rejection_reason=request.rejection_reason or "",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    agent = get_agent(db, updated_run.agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return WorkflowRunResponse(**build_run_response(updated_run, agent))
 
 
-@router.get("/demo/sample-payloads")
+@router.post("/runs/{run_id}/kill", response_model=WorkflowRunResponse, summary="Kill an active or paused run")
+def kill_run(run_id: int, db: Session = Depends(get_db)) -> WorkflowRunResponse:
+    run = get_workflow_run(db, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Workflow run not found")
+
+    try:
+        updated_run = kill_workflow_run(db, run)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    agent = get_agent(db, updated_run.agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return WorkflowRunResponse(**build_run_response(updated_run, agent))
+
+
+@router.get("/workflows/demo/sample-payloads")
 def read_sample_payloads() -> dict[str, dict]:
     return get_sample_payloads()

@@ -6,6 +6,7 @@ from typing import Any
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
+from langsmith import traceable
 
 from app.config import get_settings
 from app.models import RiskTier
@@ -39,6 +40,7 @@ class GovernanceTaskClassifier:
     def __init__(self) -> None:
         self.settings = get_settings()
 
+    @traceable(run_type="chain", name="task-classification")
     def classify(self, payload: dict[str, Any]) -> ClassificationResult:
         if self.settings.openai_api_key:
             try:
@@ -48,6 +50,7 @@ class GovernanceTaskClassifier:
                 return self._classify_with_rules(payload)
         return self._classify_with_rules(payload)
 
+    @traceable(run_type="llm", name="task-classification-openai")
     def _classify_with_openai(self, payload: dict[str, Any]) -> ClassificationResult:
         llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.0, api_key=self.settings.openai_api_key)
         prompt = PROMPT_TEMPLATE.invoke(
@@ -69,6 +72,7 @@ class GovernanceTaskClassifier:
             reasoning_summary=str(parsed["reasoning_summary"]),
         )
 
+    @traceable(run_type="chain", name="task-classification-rules")
     def _classify_with_rules(self, payload: dict[str, Any]) -> ClassificationResult:
         text = " ".join(
             str(payload.get(key, "")) for key in ["document_title", "document_text", "requested_action", "request_type"]
@@ -80,7 +84,7 @@ class GovernanceTaskClassifier:
             for keyword in ["pii", "customer data", "export", "external", "financial", "contract", "legal hold"]
         )
 
-        if contains_sensitive_data or contains_external or requested_tool in {"send_email", "update_record"}:
+        if contains_sensitive_data or contains_external or requested_tool in {"send_email", "update_vendor_record"}:
             return ClassificationResult(
                 label="sensitive_document_request",
                 summary="Request involves potentially sensitive data handling or an outward-facing action.",

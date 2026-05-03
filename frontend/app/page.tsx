@@ -1,254 +1,108 @@
-type DashboardSummary = {
-  total_agents: number;
-  active_agents: number;
-  paused_agents: number;
-  killed_agents: number;
-  pending_approvals: number;
-  high_risk_agents: number;
-};
+import Link from "next/link";
 
-type Agent = {
-  id: number;
-  name: string;
-  description: string;
-  owner_name: string;
-  team_name: string;
-  risk_tier: "low" | "medium" | "high";
-  status: "active" | "paused" | "killed";
-  is_kill_switched: boolean;
-  allowed_tools: string[];
-  model_name: string;
-};
+import { AppShell } from "../components/app-shell";
+import { MetricCard, SectionCard, StatusBadge, ToolPills } from "../components/dashboard-primitives";
+import {
+  getAgents,
+  getDashboardSummary,
+  getLogs,
+  getPendingApprovals,
+  getRuns,
+} from "../lib/dashboard";
 
-type RuntimeLog = {
-  id: number;
-  workflow_name: string;
-  event_type: string;
-  level: "info" | "warning" | "error";
-  message: string;
-  created_at: string;
-};
-
-type Approval = {
-  id: number;
-  workflow_name: string;
-  action_name: string;
-  reason: string;
-  status: "pending" | "approved" | "rejected";
-  created_at: string;
-};
-
-const fallbackSummary: DashboardSummary = {
-  total_agents: 3,
-  active_agents: 3,
-  paused_agents: 0,
-  killed_agents: 0,
-  pending_approvals: 1,
-  high_risk_agents: 1,
-};
-
-const fallbackAgents: Agent[] = [
-  {
-    id: 1,
-    name: "Vendor Risk Copilot",
-    description: "Reviews third-party vendor requests and flags governance concerns.",
-    owner_name: "Priya Shah",
-    team_name: "Security Engineering",
-    risk_tier: "medium",
-    status: "active",
-    is_kill_switched: false,
-    allowed_tools: ["slack_notify", "ticket_lookup", "policy_search"],
-    model_name: "gpt-4.1",
-  },
-  {
-    id: 2,
-    name: "PII Export Agent",
-    description: "Coordinates regulated customer data export requests with approval controls.",
-    owner_name: "Marcus Lee",
-    team_name: "Data Platform",
-    risk_tier: "high",
-    status: "active",
-    is_kill_switched: false,
-    allowed_tools: ["warehouse_query", "export_package", "email_notify"],
-    model_name: "gpt-4.1",
-  },
-  {
-    id: 3,
-    name: "Knowledge Base Curator",
-    description: "Maintains internal knowledge summaries for go-to-market teams.",
-    owner_name: "Hannah Brooks",
-    team_name: "Revenue Operations",
-    risk_tier: "low",
-    status: "active",
-    is_kill_switched: false,
-    allowed_tools: ["docs_search", "cms_publish"],
-    model_name: "gpt-4.1-mini",
-  },
-];
-
-const fallbackLogs: RuntimeLog[] = [
-  {
-    id: 1,
-    workflow_name: "regulated_export",
-    event_type: "approval_requested",
-    level: "warning",
-    message: "High-risk export requires human approval before release.",
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 2,
-    workflow_name: "vendor_review",
-    event_type: "policy_scan_completed",
-    level: "info",
-    message: "Policy evaluation completed without escalation.",
-    created_at: new Date().toISOString(),
-  },
-];
-
-const fallbackApprovals: Approval[] = [
-  {
-    id: 1,
-    workflow_name: "regulated_export",
-    action_name: "release_customer_export",
-    reason: "Customer data export exceeds automatic approval threshold.",
-    status: "pending",
-    created_at: new Date().toISOString(),
-  },
-];
-
-async function fetchJson<T>(path: string, fallback: T): Promise<T> {
-  const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
-
-  try {
-    const response = await fetch(`${baseUrl}${path}`, {
-      next: { revalidate: 0 },
-    });
-
-    if (!response.ok) {
-      return fallback;
-    }
-
-    return (await response.json()) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-export default async function HomePage() {
-  const [summary, agents, logs, approvals] = await Promise.all([
-    fetchJson<DashboardSummary>("/api/v1/observability/summary", fallbackSummary),
-    fetchJson<Agent[]>("/api/v1/agents", fallbackAgents),
-    fetchJson<RuntimeLog[]>("/api/v1/observability/logs", fallbackLogs),
-    fetchJson<Approval[]>("/api/v1/agents/approvals", fallbackApprovals),
+export default async function OverviewPage() {
+  const [summary, agents, runs, approvals, logs] = await Promise.all([
+    getDashboardSummary(),
+    getAgents(),
+    getRuns(),
+    getPendingApprovals(),
+    getLogs(),
   ]);
 
   return (
-    <main className="page-shell">
-      <section className="hero">
-        <span className="eyebrow">CTO Portfolio Demo</span>
-        <div className="hero-grid">
-          <div className="stack">
-            <h1>Govern AI agents like production software.</h1>
-            <p>
-              This proof of concept shows how agent inventory, ownership, runtime logs, approval
-              gates, and operational controls can live in one clean governance layer.
-            </p>
-          </div>
-          <div className="panel">
-            <p className="muted small">Enterprise workflow demo</p>
-            <h2 className="section-title">Regulated Data Export</h2>
-            <p className="muted">
-              High-risk actions route through a LangGraph approval checkpoint before execution, with
-              observability events written to SQLite and tracing hooks ready for LangSmith.
-            </p>
-          </div>
-        </div>
-      </section>
-
+    <AppShell
+      title="Overview"
+      subtitle="Executive view of governed agent activity, approval pressure, and simulated usage economics."
+    >
       <section className="metrics-grid">
-        <div className="panel">
-          <p className="muted small">Registered Agents</p>
-          <div className="metric-value">{summary.total_agents}</div>
-        </div>
-        <div className="panel">
-          <p className="muted small">Active</p>
-          <div className="metric-value">{summary.active_agents}</div>
-        </div>
-        <div className="panel">
-          <p className="muted small">High Risk</p>
-          <div className="metric-value">{summary.high_risk_agents}</div>
-        </div>
-        <div className="panel">
-          <p className="muted small">Pending Approvals</p>
-          <div className="metric-value">{summary.pending_approvals}</div>
-        </div>
+        <MetricCard label="Total Runs" value={summary.total_runs} />
+        <MetricCard label="Pending Approvals" value={summary.pending_approvals} />
+        <MetricCard label="Successful Runs" value={summary.successful_runs} />
+        <MetricCard label="Blocked Runs" value={summary.blocked_runs} />
+        <MetricCard label="Simulated Tokens" value={`${summary.simulated_input_tokens + summary.simulated_output_tokens}`} />
+        <MetricCard label="Simulated Cost" value={`$${summary.simulated_cost_usd.toFixed(2)}`} />
       </section>
 
-      <section className="content-grid">
-        <div className="panel">
-          <h2 className="section-title">Agent Registry</h2>
+      <section className="dashboard-grid">
+        <SectionCard title="Run Health" action={<Link href="/runs" className="text-link">Open Run Explorer</Link>}>
+          <div className="table-card">
+            <div className="table-header table-grid compact-grid">
+              <span>Run</span>
+              <span>Agent</span>
+              <span>Status</span>
+              <span>Message</span>
+            </div>
+            {runs.slice(0, 5).map((run) => (
+              <div key={run.run_id} className="table-row table-grid compact-grid">
+                <strong>#{run.run_id}</strong>
+                <span>{run.agent_name}</span>
+                <StatusBadge value={run.status} />
+                <span className="muted small">{run.message}</span>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+
+        <SectionCard title="Approval Pressure" action={<Link href="/approvals" className="text-link">Open Queue</Link>}>
+          <div className="stack">
+            {approvals.slice(0, 4).map((approval) => (
+              <article key={approval.id} className="approval-card">
+                <div className="row">
+                  <strong>Run #{approval.run_id}</strong>
+                  <StatusBadge value={approval.status} />
+                </div>
+                <p className="muted small">{approval.action_name}</p>
+                <p className="small">{approval.reason}</p>
+              </article>
+            ))}
+          </div>
+        </SectionCard>
+      </section>
+
+      <section className="dashboard-grid">
+        <SectionCard title="Agent Registry Snapshot" action={<Link href="/agents" className="text-link">Open Registry</Link>}>
           <div className="stack">
             {agents.map((agent) => (
               <article key={agent.id} className="agent-card">
                 <div className="topline">
-                  <span className={`badge ${agent.risk_tier}`}>{agent.risk_tier} risk</span>
-                  <span className={`badge ${agent.status}`}>{agent.status}</span>
+                  <StatusBadge value={agent.risk_tier ?? "low"} />
+                  <StatusBadge value={agent.status} />
                 </div>
                 <h3>{agent.name}</h3>
-                <p className="muted">{agent.description}</p>
-                <p className="small">
-                  <strong>Owner:</strong> {agent.owner_name} · <strong>Team:</strong> {agent.team_name}
+                <p className="muted small">
+                  {agent.owner_name} · {agent.team_name}
                 </p>
-                <p className="small">
-                  <strong>Model:</strong> {agent.model_name} · <strong>Kill switch:</strong>{" "}
-                  {agent.is_kill_switched ? "enabled" : "ready"}
-                </p>
-                <div className="tool-list">
-                  {agent.allowed_tools.map((tool) => (
-                    <span key={tool} className="tool-pill">
-                      {tool}
-                    </span>
-                  ))}
-                </div>
+                <ToolPills tools={agent.allowed_tools ?? []} />
               </article>
             ))}
           </div>
-        </div>
+        </SectionCard>
 
-        <div className="stack">
-          <section className="panel">
-            <h2 className="section-title">Approval Queue</h2>
-            <div className="timeline">
-              {approvals.map((approval) => (
-                <article key={approval.id} className="approval-card">
-                  <div className="row">
-                    <strong>{approval.action_name}</strong>
-                    <span className={`badge ${approval.status}`}>{approval.status}</span>
-                  </div>
-                  <p className="muted small">{approval.workflow_name}</p>
-                  <p className="small">{approval.reason}</p>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="panel">
-            <h2 className="section-title">Runtime Events</h2>
-            <div className="timeline">
-              {logs.slice(0, 5).map((log) => (
-                <article key={log.id} className="log-card">
-                  <div className="row">
-                    <strong>{log.event_type}</strong>
-                    <span className={`badge ${log.level}`}>{log.level}</span>
-                  </div>
-                  <p className="muted small">{log.workflow_name}</p>
-                  <p className="small">{log.message}</p>
-                </article>
-              ))}
-            </div>
-          </section>
-        </div>
+        <SectionCard title="Recent Events">
+          <div className="stack">
+            {logs.slice(0, 5).map((log) => (
+              <article key={log.id} className="log-card">
+                <div className="row">
+                  <strong>{log.event_type}</strong>
+                  <StatusBadge value={log.level} />
+                </div>
+                <p className="muted small">{log.workflow_name ?? "workflow"}</p>
+                <p className="small">{log.message}</p>
+              </article>
+            ))}
+          </div>
+        </SectionCard>
       </section>
-    </main>
+    </AppShell>
   );
 }

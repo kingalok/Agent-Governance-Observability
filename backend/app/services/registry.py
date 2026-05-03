@@ -7,7 +7,7 @@ from app.models import Agent, AgentStatus, ApprovalCheckpoint, ApprovalStatus, R
 
 
 def list_agents(db: Session) -> list[Agent]:
-    return list(db.scalars(select(Agent).order_by(Agent.risk_tier.desc(), Agent.name)).all())
+    return list(db.scalars(select(Agent).order_by(Agent.default_risk_tier.desc(), Agent.name)).all())
 
 
 def get_agent(db: Session, agent_id: int) -> Agent | None:
@@ -37,6 +37,14 @@ def get_runtime_logs(db: Session, limit: int = 50) -> list[RuntimeLog]:
     return list(db.scalars(select(RuntimeLog).order_by(RuntimeLog.created_at.desc()).limit(limit)).all())
 
 
+def get_run_events(db: Session, run_id: int) -> list[RuntimeLog]:
+    return list(
+        db.scalars(
+            select(RuntimeLog).where(RuntimeLog.run_id == run_id).order_by(RuntimeLog.created_at.asc(), RuntimeLog.id.asc())
+        ).all()
+    )
+
+
 def get_pending_approvals(db: Session) -> list[ApprovalCheckpoint]:
     return list(
         db.scalars(
@@ -55,10 +63,10 @@ def get_dashboard_summary(db: Session) -> dict:
     paused_agents = db.scalar(select(func.count()).select_from(Agent).where(Agent.status == AgentStatus.PAUSED)) or 0
     killed_agents = db.scalar(select(func.count()).select_from(Agent).where(Agent.status == AgentStatus.KILLED)) or 0
     high_risk_agents = (
-        db.scalar(select(func.count()).select_from(Agent).where(Agent.risk_tier == RiskTier.HIGH)) or 0
+        db.scalar(select(func.count()).select_from(Agent).where(Agent.default_risk_tier == RiskTier.HIGH)) or 0
     )
     pending_approvals = db.scalar(
-        select(func.count()).select_from(ApprovalCheckpoint).where(ApprovalCheckpoint.status == ApprovalStatus.PENDING)
+        select(func.count()).select_from(ApprovalCheckpoint).where(ApprovalCheckpoint.decision == ApprovalStatus.PENDING)
     ) or 0
 
     return {

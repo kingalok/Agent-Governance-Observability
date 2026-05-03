@@ -43,12 +43,14 @@ class RuntimeLogResponse(BaseModel):
 class ApprovalResponse(BaseModel):
     id: int
     agent_id: int
+    run_id: int | None
     workflow_name: str
     action_name: str
     reason: str
     status: ApprovalStatus
     requested_by: str
     decided_by: str | None
+    rejection_reason: str | None
     created_at: datetime
     decided_at: datetime | None
 
@@ -85,13 +87,33 @@ class DashboardSummaryResponse(BaseModel):
     high_risk_agents: int
 
 
+class HealthResponse(BaseModel):
+    status: str
+    service: str
+    version: str
+    environment: str
+    database: str
+    auth_enabled: bool
+    langsmith_tracing_enabled: bool
+
+
+class ApiErrorDetail(BaseModel):
+    event_id: str | None = None
+
+
+class ApiErrorEnvelope(BaseModel):
+    error: dict
+
+
 class WorkflowRunResponse(BaseModel):
     run_id: int
+    agent_id: int
     workflow_name: str
     agent_name: str
     status: WorkflowRunStatus
     current_node: str
     state: str
+    graph_state: dict
     risk_tier: str
     requested_tool: str | None
     approval_required: bool
@@ -117,6 +139,11 @@ class WorkflowResumeRequest(BaseModel):
     decided_by: str
 
 
+class ApprovalActionRequest(BaseModel):
+    reviewer_name: str
+    rejection_reason: str | None = None
+
+
 class WorkflowRunDetailResponse(BaseModel):
     id: int
     agent_id: int
@@ -132,6 +159,7 @@ class WorkflowRunDetailResponse(BaseModel):
     risk_label: RiskTier | None
     reasoning_summary: str | None
     final_output: dict
+    graph_state: dict = Field(default_factory=dict)
     started_at: datetime
     updated_at: datetime
     completed_at: datetime | None

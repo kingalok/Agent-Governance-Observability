@@ -203,6 +203,13 @@ cython_debug/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
 
+# Project-local generated artifacts
+.DS_Store
+*.db
+backend/.venv/
+frontend/node_modules/
+frontend/.next/
+
 # Ruff stuff:
 .ruff_cache/
 

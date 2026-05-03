@@ -1,7 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Agent, ApprovalCheckpoint, ApprovalStatus, LogLevel, RiskTier, RuntimeLog, UsageSnapshot
+from app.models import Agent, AgentTool, Approval, ApprovalStatus, LogLevel, Policy, RiskTier, Run, RunEvent, UsageSnapshot
 
 
 def seed_demo_data(db: Session) -> None:
@@ -11,84 +11,108 @@ def seed_demo_data(db: Session) -> None:
 
     agents = [
         Agent(
-            name="Vendor Risk Copilot",
-            description="Reviews third-party vendor requests and flags governance concerns.",
-            owner_name="Priya Shah",
-            team_name="Security Engineering",
-            risk_tier=RiskTier.MEDIUM,
-            allowed_tools=["slack_notify", "ticket_lookup", "policy_search"],
-            model_name="gpt-4.1",
-            token_budget_daily=150000,
-            cost_budget_daily=35.0,
-        ),
-        Agent(
-            name="PII Export Agent",
-            description="Coordinates regulated customer data export requests with approval controls.",
-            owner_name="Marcus Lee",
-            team_name="Data Platform",
-            risk_tier=RiskTier.HIGH,
-            allowed_tools=["warehouse_query", "export_package", "email_notify"],
-            model_name="gpt-4.1",
-            token_budget_daily=250000,
-            cost_budget_daily=60.0,
-        ),
-        Agent(
             name="Knowledge Base Curator",
+            owner="Hannah Brooks",
+            team="Revenue Operations",
             description="Maintains internal knowledge summaries for go-to-market teams.",
-            owner_name="Hannah Brooks",
-            team_name="Revenue Operations",
-            risk_tier=RiskTier.LOW,
-            allowed_tools=["docs_search", "cms_publish"],
+            status="active",
+            default_risk_tier=RiskTier.LOW,
             model_name="gpt-4.1-mini",
             token_budget_daily=90000,
             cost_budget_daily=12.0,
+        ),
+        Agent(
+            name="PII Export Agent",
+            owner="Marcus Lee",
+            team="Data Platform",
+            description="Coordinates regulated customer data export requests with approval controls.",
+            status="active",
+            default_risk_tier=RiskTier.HIGH,
+            model_name="gpt-4.1",
+            token_budget_daily=250000,
+            cost_budget_daily=60.0,
         ),
     ]
     db.add_all(agents)
     db.flush()
 
+    tools = [
+        AgentTool(agent_id=agents[0].id, tool_name="create_ticket", allowed=True, requires_approval=False),
+        AgentTool(agent_id=agents[1].id, tool_name="send_email", allowed=True, requires_approval=True),
+        AgentTool(agent_id=agents[1].id, tool_name="update_vendor_record", allowed=True, requires_approval=True),
+    ]
+    db.add_all(tools)
+
+    policy = Policy(
+        name="Block Email Without Approval",
+        description="Sending email from a high-risk workflow requires human approval before execution.",
+        applies_to_risk_tier=RiskTier.HIGH,
+        allowed_tools=["send_email", "update_vendor_record"],
+        requires_human_approval=True,
+    )
+    db.add(policy)
+    db.flush()
+
+    low_run = Run(
+        agent_id=agents[0].id,
+        input_payload={"request_type": "document_intake", "requested_tool": "create_ticket"},
+        risk_tier=RiskTier.LOW,
+        status="success",
+        approval_required=False,
+        approval_status=ApprovalStatus.APPROVED,
+        workflow_name="knowledge_sync",
+        request_type="document_intake",
+        requested_tool="create_ticket",
+        current_node="finalize_node",
+        final_output={"status": "success"},
+    )
+    high_run = Run(
+        agent_id=agents[1].id,
+        input_payload={"request_type": "document_intake", "requested_tool": "send_email"},
+        risk_tier=RiskTier.HIGH,
+        status="awaiting_human_approval",
+        approval_required=True,
+        approval_status=ApprovalStatus.PENDING,
+        workflow_name="regulated_export",
+        request_type="document_intake",
+        requested_tool="send_email",
+        current_node="approval_gate_node",
+        final_output={},
+    )
+    db.add_all([low_run, high_run])
+    db.flush()
+
     logs = [
-        RuntimeLog(
-            agent_id=agents[0].id,
-            workflow_name="vendor_review",
+        RunEvent(
+            run_id=low_run.id,
             event_type="policy_scan_completed",
             level=LogLevel.INFO,
             message="Policy evaluation completed without escalation.",
-            payload={"risk_score": 0.39},
+            event_payload={"risk_score": 0.18},
         ),
-        RuntimeLog(
-            agent_id=agents[1].id,
-            workflow_name="regulated_export",
+        RunEvent(
+            run_id=high_run.id,
             event_type="approval_requested",
             level=LogLevel.WARNING,
             message="High-risk export requires human approval before release.",
-            payload={"records_requested": 1245, "destination": "external_requestor"},
-        ),
-        RuntimeLog(
-            agent_id=agents[2].id,
-            workflow_name="knowledge_sync",
-            event_type="publish_success",
-            level=LogLevel.INFO,
-            message="Knowledge package published to internal workspace.",
-            payload={"documents_updated": 18},
+            event_payload={"records_requested": 1245, "destination": "external_requestor"},
         ),
     ]
     db.add_all(logs)
 
-    approval = ApprovalCheckpoint(
-        agent_id=agents[1].id,
+    approval = Approval(
+        run_id=high_run.id,
         workflow_name="regulated_export",
         action_name="release_customer_export",
         reason="Customer data export exceeds automatic approval threshold.",
-        status=ApprovalStatus.PENDING,
+        decision=ApprovalStatus.PENDING,
         requested_by="workflow-engine",
     )
     db.add(approval)
 
     usage = [
-        UsageSnapshot(agent_id=agents[0].id, input_tokens=1800, output_tokens=430, estimated_cost_usd=0.19),
-        UsageSnapshot(agent_id=agents[1].id, input_tokens=3500, output_tokens=710, estimated_cost_usd=0.54),
-        UsageSnapshot(agent_id=agents[2].id, input_tokens=1200, output_tokens=280, estimated_cost_usd=0.08),
+        UsageSnapshot(agent_id=agents[0].id, run_id=low_run.id, input_tokens=1200, output_tokens=280, estimated_cost_usd=0.08),
+        UsageSnapshot(agent_id=agents[1].id, run_id=high_run.id, input_tokens=3500, output_tokens=710, estimated_cost_usd=0.54),
     ]
     db.add_all(usage)
     db.commit()
