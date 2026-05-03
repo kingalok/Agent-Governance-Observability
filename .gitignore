@@ -149,6 +149,8 @@ activemq-data/
 
 # Environments
 .env
+.env.*
+!.env.example
 .envrc
 .venv
 env/
@@ -209,6 +211,8 @@ tempCodeRunnerFile.py
 backend/.venv/
 frontend/node_modules/
 frontend/.next/
+!frontend/lib/
+!frontend/lib/**
 
 # Ruff stuff:
 .ruff_cache/
